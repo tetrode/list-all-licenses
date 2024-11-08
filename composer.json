@@ -1,0 +1,18 @@
+{
+    "require": {
+        "symfony/console": "^7.1",
+        "symfony/serializer": "^7.1",
+        "symfony/yaml": "^7.1",
+        "symfony/property-access": "^7.1"
+    },
+    "scripts": {
+        "hello": [
+            "echo hello"
+        ]
+    },
+    "autoload": {
+        "psr-4": {
+            "ListLicenses\\": "./src"
+        }
+    }
+}

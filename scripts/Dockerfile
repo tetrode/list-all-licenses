@@ -1,9 +1,11 @@
 FROM composer:2 AS composer
 FROM php:8.3-cli AS php
 
-RUN apt-get update && apt-get upgrade
-
-RUN apt-get install -y git
+RUN apt-get update && \
+    apt-get -y upgrade && \
+    apt-get install -y --no-install-recommends git && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /app
 WORKDIR /app
@@ -26,5 +28,5 @@ WORKDIR /app
 COPY scripts/index.php public/index.php
 COPY src/ src
 
-CMD php public/index.php
+CMD ["php", "public/index.php"]
 

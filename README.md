@@ -70,3 +70,7 @@ Run in docker:
 cat ../composer.lock.example | docker run -i --rm tetrode/list-all-licenses:latest php public/index.php license:list 'php://stdin'
 
 ```
+
+# TODO
+
+* misschien ook andere velden zodat je source.url of require etc. kan afbeelden?

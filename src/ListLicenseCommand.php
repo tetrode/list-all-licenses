@@ -4,11 +4,11 @@ namespace ListLicenses;
 
 use stdClass;
 use Symfony\Component\Console\Command\Command;
-use Symfony\Component\Console\Exception\RuntimeException;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputDefinition;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
+use Symfony\Component\Console\Output\ConsoleOutputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 
 class ListLicenseCommand extends Command
@@ -20,6 +20,7 @@ class ListLicenseCommand extends Command
     private ?array $columns;
     private ?string $outfile;
     private OutputInterface $output;
+    private OutputInterface $error;
 
     protected function configure(): void
     {
@@ -53,6 +54,8 @@ class ListLicenseCommand extends Command
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $this->error = $output instanceof ConsoleOutputInterface ? $output->getErrorOutput() : $output;
+
         $this->debug = $input->getOption('debug');
         $this->format = $this->validateOutputFormat($input->getOption('format'));
         $this->columns = $this->validateColumns($input->getOption('columns'));
@@ -60,7 +63,7 @@ class ListLicenseCommand extends Command
         $this->output = $output;
 
         $filename = $this->getComposerLockFilename($input);
-        $this->output->writeln("Analyzing <info>$filename</info>");
+        $this->error->writeln("Analyzing <info>$filename</info>");
         $obj = $this->readInput($filename);
         $text = $this->convert($obj);
         $this->writeOutput($text);
@@ -76,86 +79,8 @@ class ListLicenseCommand extends Command
         if (in_array($format, ['csv', 'xml', 'yaml', 'json'])) {
             return $format;
         }
-        return 'csv';
-    }
 
-    private function getComposerLockFilename(InputInterface $input): mixed
-    {
-        $filename = $input->getArgument('composer.lock');
-        if (!$filename) {
-            $filename = "composer.lock";
-        }
-        return $filename;
-    }
-
-    private function getComposerLockContents(mixed $text): string
-    {
-        $string = @file_get_contents($text);
-        if (!$string) {
-            throw new RuntimeException(sprintf('Cannot open "%s"', $text));
-        }
-        return $string;
-    }
-
-    private function convertComposerContentToObject(string $string, string $text): stdClass
-    {
-        $obj = @json_decode($string);
-        if (!$obj) {
-            throw new RuntimeException(sprintf('The file "%s" does not appear to be JSON', $text));
-        }
-        if (!isset($obj->packages)) {
-            throw new RuntimeException(sprintf('The file "%s" does not appear to a composer package', $text));
-        }
-        return $obj;
-    }
-
-    private function addPackages(stdClass $obj): array
-    {
-        $packages = [];
-        foreach ($obj->packages as $package) {
-            if ($this->debug) {
-                $this->output->writeln("<info>Adding name: $package->name</info>");
-            }
-            $packages[] = new Package($package);
-        }
-        return $packages;
-    }
-
-    private function serializePackages(array $packages): string
-    {
-        //$packages = $this->filter($packages);
-        $serial = new Serial($this->columns);
-        return match ($this->format) {
-            'json' => $serial->json($packages),
-            'xml' => $serial->xml($packages),
-            'csv' => $serial->csv($packages),
-            'yaml' => $serial->yaml($packages),
-            default => throw new RuntimeException(sprintf('Unknown format "%s"', $this->format)),
-        };
-    }
-
-    private function readInput(mixed $filename): stdClass
-    {
-        $json = $this->getComposerLockContents($filename);
-        return $this->convertComposerContentToObject($json, $filename);
-    }
-
-    private function convert(stdClass $obj): string
-    {
-        $packages = $this->addPackages($obj);
-        return $this->serializePackages($packages);
-    }
-
-    private function writeOutput(string $text): void
-    {
-        if (is_null($this->outfile)) {
-            print $text;
-            return;
-        }
-
-        if (!file_put_contents($this->outfile, $text)) {
-            throw new RuntimeException(sprintf('Cannot write to "%s"', $this->outfile));
-        }
+        throw Exceptions\ListLicenseCommand::wrongFormat($format);
     }
 
     private function validateColumns(?string $columnString): array
@@ -167,9 +92,87 @@ class ListLicenseCommand extends Command
         $expected = explode(",", self::$defaultColumns);
         foreach ($columns as $column) {
             if (!in_array($column, $expected)) {
-                throw new RuntimeException(sprintf('The column "%s" is not recognized', $column));
+                throw Exceptions\ListLicenseCommand::unknownColumn($column);
             }
         }
         return $columns;
+    }
+
+    private function getComposerLockFilename(InputInterface $input): mixed
+    {
+        $filename = $input->getArgument('composer.lock');
+        if (!$filename) {
+            $filename = "composer.lock";
+        }
+        return $filename;
+    }
+
+    private function readInput(mixed $filename): stdClass
+    {
+        $json = $this->getComposerLockContents($filename);
+        return $this->convertComposerContentToObject($json, $filename);
+    }
+
+    private function getComposerLockContents(mixed $text): string
+    {
+        $string = @file_get_contents($text);
+        if (!$string) {
+            throw Exceptions\ListLicenseCommand::cannotOpen($text);
+        }
+        return $string;
+    }
+
+    private function convertComposerContentToObject(string $string, string $filename): stdClass
+    {
+        $obj = @json_decode($string);
+        if (!$obj) {
+            throw Exceptions\ListLicenseCommand::notJson($filename);
+        }
+        if (!isset($obj->packages)) {
+            throw Exceptions\ListLicenseCommand::notComposer($filename);
+        }
+        return $obj;
+    }
+
+    private function convert(stdClass $obj): string
+    {
+        $packages = $this->addPackages($obj);
+        return $this->serializePackages($packages);
+    }
+
+    private function addPackages(stdClass $obj): array
+    {
+        $packages = [];
+        foreach ($obj->packages as $package) {
+            if ($this->debug) {
+                $this->error->writeln("<info>Adding name: $package->name</info>");
+            }
+            $packages[] = new Package($package);
+        }
+        return $packages;
+    }
+
+    private function serializePackages(array $packages): string
+    {
+        $serial = new Serial($this->columns);
+        return match ($this->format) {
+            'json' => $serial->json($packages),
+            'xml' => $serial->xml($packages),
+            'csv' => $serial->csv($packages),
+            'yaml' => $serial->yaml($packages),
+            default => throw Exceptions\ListLicenseCommand::unknownFormat($this->format)
+        };
+    }
+
+    private function writeOutput(string $text): void
+    {
+        if (is_null($this->outfile)) {
+            $this->output->writeln($text);
+            return;
+        }
+
+        if (!file_put_contents($this->outfile, $text)) {
+            throw Exceptions\ListLicenseCommand::cannotWrite($this->outfile);
+        }
     }
 }
